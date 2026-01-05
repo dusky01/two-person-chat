@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { kv } from '@vercel/kv'
+import { createClient } from 'redis'
 
 interface Message {
   id: string
@@ -11,9 +11,23 @@ interface Message {
 const MESSAGES_KEY = 'chat:messages'
 const MAX_MESSAGES = 100
 
+let redisClient: ReturnType<typeof createClient> | null = null
+
+async function getRedisClient() {
+  if (!redisClient) {
+    redisClient = createClient({
+      url: process.env.REDIS_URL,
+    })
+    await redisClient.connect()
+  }
+  return redisClient
+}
+
 export async function GET() {
   try {
-    const messages = await kv.get<Message[]>(MESSAGES_KEY) || []
+    const client = await getRedisClient()
+    const data = await client.get(MESSAGES_KEY)
+    const messages = data ? JSON.parse(data) : []
     return NextResponse.json({ messages })
   } catch (error) {
     console.error('Error fetching messages:', error)
@@ -40,8 +54,11 @@ export async function POST(request: NextRequest) {
       timestamp,
     }
 
+    const client = await getRedisClient()
+    
     // Get existing messages
-    const messages = await kv.get<Message[]>(MESSAGES_KEY) || []
+    const data = await client.get(MESSAGES_KEY)
+    const messages: Message[] = data ? JSON.parse(data) : []
     messages.push(newMessage)
 
     // Keep only last 100 messages
@@ -49,8 +66,8 @@ export async function POST(request: NextRequest) {
       messages.splice(0, messages.length - MAX_MESSAGES)
     }
 
-    // Save back to KV
-    await kv.set(MESSAGES_KEY, messages)
+    // Save back to Redis
+    await client.set(MESSAGES_KEY, JSON.stringify(messages))
 
     return NextResponse.json({ message: newMessage })
   } catch (error) {
@@ -65,7 +82,8 @@ export async function POST(request: NextRequest) {
 // Optional: Add a DELETE endpoint to clear messages
 export async function DELETE() {
   try {
-    await kv.del(MESSAGES_KEY)
+    const client = await getRedisClient()
+    await client.del(MESSAGES_KEY)
     return NextResponse.json({ success: true })
   } catch (error) {
     return NextResponse.json(
