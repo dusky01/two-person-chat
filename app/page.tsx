@@ -88,7 +88,7 @@ export default function Chat() {
     return (
       <div className={styles.container}>
         <div className={styles.joinCard}>
-          <h1 className={styles.title}>Two Person Chat</h1>
+          <h1 className={styles.title}>makeupmore</h1>
           <p className={styles.subtitle}>Enter your name and password to join</p>
           <form onSubmit={handleJoin} className={styles.joinForm}>
             <input
