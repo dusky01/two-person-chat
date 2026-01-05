@@ -3,7 +3,7 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
   title: 'makeupmore',
-  description: 'Simple chat application for two people',
+  description: 'find your perfect makeup products',
 }
 
 export default function RootLayout({
