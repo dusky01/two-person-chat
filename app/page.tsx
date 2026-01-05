@@ -18,13 +18,26 @@ export default function Chat() {
   const [isJoined, setIsJoined] = useState(false)
   const [error, setError] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const previousMessageCountRef = useRef(0)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
   useEffect(() => {
-    scrollToBottom()
+    // Only auto-scroll if new messages were added
+    if (messages.length > previousMessageCountRef.current) {
+      const container = messagesContainerRef.current
+      if (container) {
+        // Only auto-scroll if user is near the bottom (within 100px)
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
+        if (isNearBottom) {
+          scrollToBottom()
+        }
+      }
+    }
+    previousMessageCountRef.current = messages.length
   }, [messages])
 
   useEffect(() => {
@@ -125,7 +138,7 @@ export default function Chat() {
           <span className={styles.username}>Welcome, {username}!</span>
         </div>
 
-        <div className={styles.messagesContainer}>
+        <div className={styles.messagesContainer} ref={messagesContainerRef}>
           {messages.length === 0 ? (
             <div className={styles.emptyState}>
               <p>No messages yet. Start the conversation!</p>
