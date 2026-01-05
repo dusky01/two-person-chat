@@ -82,7 +82,14 @@ export default function Chat() {
     } catch (error) {
       console.error('Error sending message:', error)
     }
-  }and password to join</p>
+  }
+
+  if (!isJoined) {
+    return (
+      <div className={styles.container}>
+        <div className={styles.joinCard}>
+          <h1 className={styles.title}>Two Person Chat</h1>
+          <p className={styles.subtitle}>Enter your name and password to join</p>
           <form onSubmit={handleJoin} className={styles.joinForm}>
             <input
               type="text"
@@ -100,14 +107,7 @@ export default function Chat() {
               placeholder="Password"
               className={styles.joinInput}
             />
-            {error && <p className={styles.error}>{error}</p>}type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Your name"
-              className={styles.joinInput}
-              maxLength={20}
-              autoFocus
-            />
+            {error && <p className={styles.error}>{error}</p>}
             <button type="submit" className={styles.joinButton}>
               Join Chat
             </button>
