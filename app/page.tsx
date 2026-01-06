@@ -25,10 +25,17 @@ export default function Chat() {
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const [isTyping, setIsTyping] = useState(false)
   const [otherUserTyping, setOtherUserTyping] = useState(false)
+  const [inCall, setInCall] = useState(false)
+  const [callStatus, setCallStatus] = useState<'idle' | 'calling' | 'incoming' | 'connected'>('idle')
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const previousMessageCountRef = useRef(0)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
+  const localVideoRef = useRef<HTMLVideoElement>(null)
+  const remoteVideoRef = useRef<HTMLVideoElement>(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -73,15 +80,37 @@ export default function Chat() {
       }
     }
 
+    const checkCallSignal = async () => {
+      try {
+        const response = await fetch(`/api/call?user=${username}`)
+        const data = await response.json()
+        if (data.signal && data.from !== username) {
+          if (data.signal.type === 'offer' && callStatus === 'idle') {
+            setCallStatus('incoming')
+          } else if (data.signal.type === 'answer' && callStatus === 'calling') {
+            await handleAnswer(data.signal.sdp)
+          } else if (data.signal.candidate) {
+            await handleIceCandidate(data.signal.candidate)
+          } else if (data.signal.type === 'end') {
+            endCall()
+          }
+        }
+      } catch (error) {
+        console.error('Error checking call signal:', error)
+      }
+    }
+
     fetchMessages()
     const messageInterval = setInterval(fetchMessages, 1000)
     const typingInterval = setInterval(checkTyping, 500)
+    const callInterval = setInterval(checkCallSignal, 500)
 
     return () => {
       clearInterval(messageInterval)
       clearInterval(typingInterval)
+      clearInterval(callInterval)
     }
-  }, [isJoined, username])
+  }, [isJoined, username, callStatus])
 
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault()
@@ -167,6 +196,163 @@ export default function Chat() {
     setReplyingTo(null)
   }
 
+  const initializePeerConnection = () => {
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    })
+
+    pc.onicecandidate = async (event) => {
+      if (event.candidate) {
+        await fetch('/api/call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: username,
+            signal: { candidate: event.candidate }
+          })
+        })
+      }
+    }
+
+    pc.ontrack = (event) => {
+      setRemoteStream(event.streams[0])
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = event.streams[0]
+      }
+    }
+
+    peerConnectionRef.current = pc
+    return pc
+  }
+
+  const startCall = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      setLocalStream(stream)
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream
+      }
+
+      const pc = initializePeerConnection()
+      stream.getTracks().forEach(track => pc.addTrack(track, stream))
+
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+
+      await fetch('/api/call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: username,
+          signal: { type: 'offer', sdp: offer.sdp }
+        })
+      })
+
+      setCallStatus('calling')
+      setInCall(true)
+    } catch (error) {
+      console.error('Error starting call:', error)
+      alert('Could not access camera/microphone')
+    }
+  }
+
+  const answerCall = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      setLocalStream(stream)
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream
+      }
+
+      const pc = initializePeerConnection()
+      stream.getTracks().forEach(track => pc.addTrack(track, stream))
+
+      const response = await fetch(`/api/call?user=${username}`)
+      const data = await response.json()
+      
+      if (data.signal && data.signal.type === 'offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: data.signal.sdp }))
+        const answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+
+        await fetch('/api/call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: username,
+            signal: { type: 'answer', sdp: answer.sdp }
+          })
+        })
+
+        setCallStatus('connected')
+        setInCall(true)
+      }
+    } catch (error) {
+      console.error('Error answering call:', error)
+    }
+  }
+
+  const handleAnswer = async (sdp: string) => {
+    try {
+      const pc = peerConnectionRef.current
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }))
+        setCallStatus('connected')
+      }
+    } catch (error) {
+      console.error('Error handling answer:', error)
+    }
+  }
+
+  const handleIceCandidate = async (candidate: RTCIceCandidateInit) => {
+    try {
+      const pc = peerConnectionRef.current
+      if (pc && pc.remoteDescription) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate))
+      }
+    } catch (error) {
+      console.error('Error handling ICE candidate:', error)
+    }
+  }
+
+  const endCall = () => {
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop())
+      setLocalStream(null)
+    }
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close()
+      peerConnectionRef.current = null
+    }
+    setRemoteStream(null)
+    setCallStatus('idle')
+    setInCall(false)
+
+    fetch('/api/call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: username,
+        signal: { type: 'end' }
+      })
+    })
+  }
+
+  const rejectCall = () => {
+    setCallStatus('idle')
+    fetch('/api/call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: username,
+        signal: { type: 'end' }
+      })
+    })
+  }
+
   if (!isJoined) {
     return (
       <div className={styles.container}>
@@ -205,8 +391,37 @@ export default function Chat() {
       <div className={styles.chatCard}>
         <div className={styles.header}>
           <h2 className={styles.headerTitle}>Chat Room</h2>
-          <span className={styles.username}>Welcome, {username}!</span>
+          <div className={styles.headerRight}>
+            {!inCall && callStatus === 'idle' && (
+              <button onClick={startCall} className={styles.callButton}>
+                📹 Call
+              </button>
+            )}
+            {inCall && (
+              <button onClick={endCall} className={styles.endCallButton}>
+                End Call
+              </button>
+            )}
+            <span className={styles.username}>Welcome, {username}!</span>
+          </div>
         </div>
+
+        {callStatus === 'incoming' && (
+          <div className={styles.incomingCall}>
+            <p>Incoming call...</p>
+            <div className={styles.callActions}>
+              <button onClick={answerCall} className={styles.answerButton}>Answer</button>
+              <button onClick={rejectCall} className={styles.rejectButton}>Reject</button>
+            </div>
+          </div>
+        )}
+
+        {inCall && (
+          <div className={styles.videoContainer}>
+            <video ref={remoteVideoRef} autoPlay playsInline className={styles.remoteVideo} />
+            <video ref={localVideoRef} autoPlay playsInline muted className={styles.localVideo} />
+          </div>
+        )}
 
         <div className={styles.messagesContainer} ref={messagesContainerRef}>
           {messages.length === 0 ? (
