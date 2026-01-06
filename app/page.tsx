@@ -200,17 +200,23 @@ export default function Chat() {
               console.log('Received signal: candidate')
               await handleIceCandidate(signal.candidate)
             } else if (signal.type === 'offer') {
-              console.log('Received signal: offer')
+              console.log('Received signal: offer from', from)
               if (callStatus === 'idle') {
+                console.log('Setting incoming call state')
                 setIncomingCallType(signal.callType || 'audio')
                 setCallStatus('incoming')
                 // Store the offer for when user answers
                 window.sessionStorage.setItem('pendingOffer', JSON.stringify(signal))
+                console.log('Stored pending offer, callType:', signal.callType)
+              } else {
+                console.log('Ignoring offer, callStatus:', callStatus)
               }
             } else if (signal.type === 'answer') {
               console.log('Received signal: answer')
               if (callStatus === 'calling') {
                 await handleAnswer(signal.sdp)
+              } else {
+                console.log('Ignoring answer, callStatus:', callStatus)
               }
             } else if (signal.type === 'end') {
               console.log('Received signal: end - ending call')
@@ -460,18 +466,23 @@ export default function Chat() {
 
   const answerCall = async () => {
     try {
-      console.log('Answering call')
+      console.log('========== ANSWERING CALL ==========')
       const pendingOffer = window.sessionStorage.getItem('pendingOffer')
+      console.log('Pending offer from storage:', pendingOffer ? 'Found' : 'NOT FOUND')
+      
       if (!pendingOffer) {
-        console.error('No pending offer found')
+        console.error('No pending offer found in sessionStorage!')
+        alert('Call expired. Please ask the caller to try again.')
+        setCallStatus('idle')
         return
       }
       
       const offerSignal = JSON.parse(pendingOffer)
       const type = offerSignal.callType || 'audio'
-      console.log('Call type:', type)
+      console.log('Call type from offer:', type)
       setCallType(type)
 
+      console.log('Requesting media permissions...')
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: type === 'video' ? { 
           width: { ideal: 1280 },
@@ -483,30 +494,33 @@ export default function Chat() {
           autoGainControl: true
         }
       })
-      console.log('Got local stream with tracks:', stream.getTracks().map(t => `${t.kind}:${t.label}`))
+      console.log('Got local stream with tracks:', stream.getTracks().map(t => `${t.kind}:${t.label}:${t.enabled}`))
       setLocalStream(stream)
 
+      console.log('Initializing peer connection...')
       const pc = initializePeerConnection()
       
       // Add tracks to peer connection
       stream.getTracks().forEach(track => {
-        console.log('Adding local track:', track.kind)
+        console.log('Adding local track to PC:', track.kind, track.enabled)
         pc.addTrack(track, stream)
       })
       
       // Set remote description (the offer)
-      console.log('Setting remote description (offer)')
+      console.log('Setting remote description with SDP length:', offerSignal.sdp?.length)
       await pc.setRemoteDescription(new RTCSessionDescription({ 
         type: 'offer', 
         sdp: offerSignal.sdp 
       }))
+      console.log('Remote description set successfully')
       
       // Add any pending ICE candidates
       if (pendingCandidatesRef.current.length > 0) {
-        console.log('Adding pending ICE candidates:', pendingCandidatesRef.current.length)
+        console.log('Adding', pendingCandidatesRef.current.length, 'pending ICE candidates')
         for (const candidate of pendingCandidatesRef.current) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(candidate))
+            console.log('Added pending candidate')
           } catch (e) {
             console.error('Error adding pending candidate:', e)
           }
@@ -515,12 +529,14 @@ export default function Chat() {
       }
       
       // Create answer
+      console.log('Creating answer...')
       const answer = await pc.createAnswer()
-      console.log('Created answer')
+      console.log('Created answer, setting local description...')
       await pc.setLocalDescription(answer)
 
       // Send answer
-      await fetch('/api/call', {
+      console.log('Sending answer to signaling server...')
+      const response = await fetch('/api/call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -528,12 +544,15 @@ export default function Chat() {
           signal: { type: 'answer', sdp: answer.sdp }
         })
       })
+      console.log('Answer sent, response:', response.ok)
 
       setCallStatus('connected')
       setInCall(true)
       window.sessionStorage.removeItem('pendingOffer')
+      console.log('========== ANSWER COMPLETE ==========')
     } catch (error) {
-      console.error('Error answering call:', error)
+      console.error('========== ERROR ANSWERING CALL ==========')
+      console.error('Error details:', error)
       alert('Could not access microphone/camera. Please check permissions and try again.')
       setCallStatus('idle')
     }
@@ -615,7 +634,7 @@ export default function Chat() {
 
         {callStatus === 'incoming' && (
           <div className={styles.incomingCall}>
-            <p>Incoming call...</p>
+            <p>Incoming {incomingCallType} call...</p>
             <div className={styles.callActions}>
               <button onClick={answerCall} className={styles.answerButton}>Answer</button>
               <button onClick={rejectCall} className={styles.rejectButton}>Reject</button>
