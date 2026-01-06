@@ -57,11 +57,9 @@ export default function Chat() {
   }
 
   useEffect(() => {
-    // Only auto-scroll if new messages were added
     if (messages.length > previousMessageCountRef.current) {
       const container = messagesContainerRef.current
       if (container) {
-        // Only auto-scroll if user is near the bottom (within 100px)
         const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
         if (isNearBottom) {
           scrollToBottom()
@@ -70,6 +68,71 @@ export default function Chat() {
     }
     previousMessageCountRef.current = messages.length
   }, [messages])
+
+  const handleAnswer = async (sdp: string) => {
+    try {
+      console.log('Handling answer')
+      const pc = peerConnectionRef.current
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }))
+        
+        if (pendingCandidatesRef.current.length > 0) {
+          console.log('Adding pending ICE candidates:', pendingCandidatesRef.current.length)
+          for (const candidate of pendingCandidatesRef.current) {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate))
+          }
+          pendingCandidatesRef.current = []
+        }
+      }
+    } catch (error) {
+      console.error('Error handling answer:', error)
+    }
+  }
+
+  const handleIceCandidate = async (candidate: RTCIceCandidateInit) => {
+    try {
+      const pc = peerConnectionRef.current
+      if (pc) {
+        if (pc.remoteDescription && pc.remoteDescription.type) {
+          console.log('Adding ICE candidate')
+          await pc.addIceCandidate(new RTCIceCandidate(candidate))
+        } else {
+          console.log('Queuing ICE candidate for later')
+          pendingCandidatesRef.current.push(candidate)
+        }
+      }
+    } catch (error) {
+      console.error('Error handling ICE candidate:', error)
+    }
+  }
+
+  const endCall = () => {
+    console.log('Ending call')
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        track.stop()
+        console.log('Stopped track:', track.kind)
+      })
+      setLocalStream(null)
+    }
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close()
+      peerConnectionRef.current = null
+    }
+    setRemoteStream(null)
+    setCallStatus('idle')
+    setInCall(false)
+    pendingCandidatesRef.current = []
+
+    fetch('/api/call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: username,
+        signal: { type: 'end' }
+      })
+    }).catch(e => console.error('Error sending end signal:', e))
+  }
 
   useEffect(() => {
     if (!isJoined) return
@@ -294,7 +357,13 @@ export default function Chat() {
       setInCall(true)
     } catch (error) {
       console.error('Error starting call:', error)
-      alerole.log('Answering call')
+      alert('Could not access microphone/camera. Please check permissions.')
+    }
+  }
+
+  const answerCall = async () => {
+    try {
+      console.log('Answering call')
       const response = await fetch(`/api/call?user=${username}`)
       const data = await response.json()
       
@@ -319,7 +388,6 @@ export default function Chat() {
         console.log('Setting remote description (offer)')
         await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: data.signal.sdp }))
         
-        // Add any pending ICE candidates
         if (pendingCandidatesRef.current.length > 0) {
           console.log('Adding pending ICE candidates:', pendingCandidatesRef.current.length)
           for (const candidate of pendingCandidatesRef.current) {
@@ -346,80 +414,8 @@ export default function Chat() {
       }
     } catch (error) {
       console.error('Error answering call:', error)
-      alert('Could not access microphone/camera. Please check permissions.
-        
-        // Add any pending ICE candidates
-        if (pendingCandidatesRef.current.length > 0) {
-          console.log('Adding pending ICE candidates:', pendingCandidatesRef.current.length)
-          for (const candidate of pendingCandidatesRef.current) {
-            await pc.addIceCandidate(new RTCIceCandidate(candidate))
-          }
-          pendingCandidatesRef.current = []
-        }
-      }
-    } catch (error) {
-      console.error('Error handling answer:', error)
+      alert('Could not access microphone/camera. Please check permissions.')
     }
-  }
-
-  const handleIceCandidate = async (candidate: RTCIceCandidateInit) => {
-    try {
-      const pc = peerConnectionRef.current
-      if (pc) {
-        if (pc.remoteDescription && pc.remoteDescription.type) {
-          console.log('Adding ICE candidate')
-          await pc.addIceCandidate(new RTCIceCandidate(candidate))
-        } else {
-          console.log('Queuing ICE candidate for later')
-    console.log('Ending call')
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        track.stop()
-        console.log('Stopped track:', track.kind)
-      })
-      setLocalStream(null)
-    }
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close()
-      peerConnectionRef.current = null
-    }
-    setRemoteStream(null)
-    setCallStatus('idle')
-    setInCall(false)
-    pendingCandidatesRef.current = []
-        if (pc.remoteDescription) {
-          console.log('Adding ICE candidate')
-          await pc.addIceCandidate(new RTCIceCandidate(candidate))
-        } else {
-          console.log('Waiting for remote description before adding ICE candidate')
-        }
-      }
-    } catch (error) {
-      console.error('Error handling ICE candidate:', error)
-    }
-  }
-
-  const endCall = () => {
-    if (localStream) {
-      localStream.getTracks().forEach(track => track.stop())
-      setLocalStream(null)
-    }
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close()
-      peerConnectionRef.current = null
-    }
-    setRemoteStream(null)
-    setCallStatus('idle')
-    setInCall(false)
-
-    fetch('/api/call', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: username,
-        signal: { type: 'end' }
-      })
-    })
   }
 
   const rejectCall = () => {
