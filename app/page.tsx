@@ -38,6 +38,7 @@ export default function Chat() {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
+  const remoteAudioRef = useRef<HTMLAudioElement>(null)
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([])
   const lastSignalIdRef = useRef<string>('')
 
@@ -51,6 +52,10 @@ export default function Chat() {
     if (remoteStream && remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = remoteStream
       remoteVideoRef.current.play().catch(e => console.error('Error playing remote:', e))
+    }
+    if (remoteStream && remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStream
+      remoteAudioRef.current.play().catch(e => console.error('Error playing remote audio:', e))
     }
   }, [remoteStream])
 
@@ -173,19 +178,24 @@ export default function Chat() {
             
             if (from === username) continue
             
-            console.log('Received signal:', signal.type)
-            
-            if (signal.type === 'offer' && callStatus === 'idle') {
+            // Check for ICE candidate first (it won't have a type)
+            if (signal.candidate) {
+              console.log('Received signal: candidate')
+              await handleIceCandidate(signal.candidate)
+            } else if (signal.type === 'offer' && callStatus === 'idle') {
+              console.log('Received signal: offer')
               setIncomingCallType(signal.callType || 'audio')
               setCallStatus('incoming')
               // Store the offer for when user answers
               window.sessionStorage.setItem('pendingOffer', JSON.stringify(signal))
             } else if (signal.type === 'answer' && callStatus === 'calling') {
+              console.log('Received signal: answer')
               await handleAnswer(signal.sdp)
-            } else if (signal.candidate) {
-              await handleIceCandidate(signal.candidate)
             } else if (signal.type === 'end') {
+              console.log('Received signal: end')
               endCall()
+            } else {
+              console.log('Received signal:', signal.type)
             }
           }
         }
@@ -601,7 +611,7 @@ export default function Chat() {
                 <p className={styles.audioCallSubtext}>
                   {callStatus === 'connected' ? '✓ Connected' : 'Connecting...'}
                 </p>
-                <audio ref={remoteVideoRef as any} autoPlay playsInline />
+                <audio ref={remoteAudioRef} autoPlay playsInline />
               </div>
             )}
           </div>
