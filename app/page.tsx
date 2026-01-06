@@ -30,6 +30,7 @@ export default function Chat() {
   const [callStatus, setCallStatus] = useState<'idle' | 'calling' | 'incoming' | 'connected'>('idle')
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
+  const [incomingCallType, setIncomingCallType] = useState<'audio' | 'video'>('audio')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const previousMessageCountRef = useRef(0)
@@ -38,6 +39,7 @@ export default function Chat() {
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([])
+  const lastSignalIdRef = useRef<string>('')
 
   useEffect(() => {
     if (localStream && localVideoRef.current) {
@@ -123,6 +125,7 @@ export default function Chat() {
     setCallStatus('idle')
     setInCall(false)
     pendingCandidatesRef.current = []
+    window.sessionStorage.removeItem('pendingOffer')
 
     fetch('/api/call', {
       method: 'POST',
@@ -160,17 +163,30 @@ export default function Chat() {
 
     const checkCallSignal = async () => {
       try {
-        const response = await fetch(`/api/call?user=${username}`)
+        const response = await fetch(`/api/call?user=${username}&lastId=${lastSignalIdRef.current}`)
         const data = await response.json()
-        if (data.signal && data.from !== username) {
-          if (data.signal.type === 'offer' && callStatus === 'idle') {
-            setCallStatus('incoming')
-          } else if (data.signal.type === 'answer' && callStatus === 'calling') {
-            await handleAnswer(data.signal.sdp)
-          } else if (data.signal.candidate) {
-            await handleIceCandidate(data.signal.candidate)
-          } else if (data.signal.type === 'end') {
-            endCall()
+        
+        if (data.signals && data.signals.length > 0) {
+          for (const signalData of data.signals) {
+            lastSignalIdRef.current = signalData.id
+            const { signal, from } = signalData
+            
+            if (from === username) continue
+            
+            console.log('Received signal:', signal.type)
+            
+            if (signal.type === 'offer' && callStatus === 'idle') {
+              setIncomingCallType(signal.callType || 'audio')
+              setCallStatus('incoming')
+              // Store the offer for when user answers
+              window.sessionStorage.setItem('pendingOffer', JSON.stringify(signal))
+            } else if (signal.type === 'answer' && callStatus === 'calling') {
+              await handleAnswer(signal.sdp)
+            } else if (signal.candidate) {
+              await handleIceCandidate(signal.candidate)
+            } else if (signal.type === 'end') {
+              endCall()
+            }
           }
         }
       } catch (error) {
@@ -279,41 +295,54 @@ export default function Chat() {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
       ]
     })
 
     pc.onicecandidate = async (event) => {
       if (event.candidate) {
-        console.log('Sending ICE candidate')
-        await fetch('/api/call', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            from: username,
-            signal: { candidate: event.candidate }
+        console.log('Sending ICE candidate:', event.candidate.type)
+        try {
+          await fetch('/api/call', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              from: username,
+              signal: { candidate: event.candidate.toJSON() }
+            })
           })
-        })
+        } catch (error) {
+          console.error('Error sending ICE candidate:', error)
+        }
       }
     }
 
     pc.ontrack = (event) => {
       console.log('Received remote track:', event.track.kind)
-      const stream = event.streams[0]
-      if (stream) {
-        setRemoteStream(stream)
+      if (event.streams && event.streams[0]) {
+        console.log('Setting remote stream')
+        setRemoteStream(event.streams[0])
       }
     }
 
     pc.oniceconnectionstatechange = () => {
       console.log('ICE connection state:', pc.iceConnectionState)
-      if (pc.iceConnectionState === 'connected') {
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         setCallStatus('connected')
+      } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+        console.log('Call disconnected')
+        endCall()
       }
     }
 
     pc.onsignalingstatechange = () => {
       console.log('Signaling state:', pc.signalingState)
+    }
+
+    pc.onconnectionstatechange = () => {
+      console.log('Connection state:', pc.connectionState)
     }
 
     peerConnectionRef.current = pc
@@ -324,19 +353,30 @@ export default function Chat() {
     try {
       console.log('Starting call:', type)
       setCallType(type)
+      
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: type === 'video' ? { width: 640, height: 480 } : false, 
-        audio: true 
+        video: type === 'video' ? { 
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } : false, 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
       })
-      console.log('Got local stream:', stream.getTracks().map(t => t.kind))
+      console.log('Got local stream with tracks:', stream.getTracks().map(t => `${t.kind}:${t.label}`))
       setLocalStream(stream)
 
       const pc = initializePeerConnection()
+      
+      // Add tracks to peer connection
       stream.getTracks().forEach(track => {
-        console.log('Adding track:', track.kind)
+        console.log('Adding local track:', track.kind, track.enabled)
         pc.addTrack(track, stream)
       })
 
+      // Create offer with proper constraints
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: type === 'video'
@@ -344,82 +384,115 @@ export default function Chat() {
       console.log('Created offer')
       await pc.setLocalDescription(offer)
 
+      // Send offer
       await fetch('/api/call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           from: username,
-          signal: { type: 'offer', sdp: offer.sdp, callType: type }
+          signal: { 
+            type: 'offer', 
+            sdp: offer.sdp, 
+            callType: type 
+          }
         })
       })
 
       setCallStatus('calling')
       setInCall(true)
+      console.log('Offer sent, waiting for answer...')
     } catch (error) {
       console.error('Error starting call:', error)
-      alert('Could not access microphone/camera. Please check permissions.')
+      alert('Could not access microphone/camera. Please check permissions and try again.')
+      setCallStatus('idle')
+      setInCall(false)
     }
   }
 
   const answerCall = async () => {
     try {
       console.log('Answering call')
-      const response = await fetch(`/api/call?user=${username}`)
-      const data = await response.json()
+      const pendingOffer = window.sessionStorage.getItem('pendingOffer')
+      if (!pendingOffer) {
+        console.error('No pending offer found')
+        return
+      }
       
-      const type = data.signal?.callType || 'audio'
+      const offerSignal = JSON.parse(pendingOffer)
+      const type = offerSignal.callType || 'audio'
       console.log('Call type:', type)
       setCallType(type)
 
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: type === 'video' ? { width: 640, height: 480 } : false, 
-        audio: true 
+        video: type === 'video' ? { 
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } : false, 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
       })
-      console.log('Got local stream:', stream.getTracks().map(t => t.kind))
+      console.log('Got local stream with tracks:', stream.getTracks().map(t => `${t.kind}:${t.label}`))
       setLocalStream(stream)
 
       const pc = initializePeerConnection()
+      
+      // Add tracks to peer connection
       stream.getTracks().forEach(track => {
-        console.log('Adding track:', track.kind)
+        console.log('Adding local track:', track.kind)
         pc.addTrack(track, stream)
       })
       
-      if (data.signal && data.signal.type === 'offer') {
-        console.log('Setting remote description (offer)')
-        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: data.signal.sdp }))
-        
-        if (pendingCandidatesRef.current.length > 0) {
-          console.log('Adding pending ICE candidates:', pendingCandidatesRef.current.length)
-          for (const candidate of pendingCandidatesRef.current) {
+      // Set remote description (the offer)
+      console.log('Setting remote description (offer)')
+      await pc.setRemoteDescription(new RTCSessionDescription({ 
+        type: 'offer', 
+        sdp: offerSignal.sdp 
+      }))
+      
+      // Add any pending ICE candidates
+      if (pendingCandidatesRef.current.length > 0) {
+        console.log('Adding pending ICE candidates:', pendingCandidatesRef.current.length)
+        for (const candidate of pendingCandidatesRef.current) {
+          try {
             await pc.addIceCandidate(new RTCIceCandidate(candidate))
+          } catch (e) {
+            console.error('Error adding pending candidate:', e)
           }
-          pendingCandidatesRef.current = []
         }
-        
-        const answer = await pc.createAnswer()
-        console.log('Created answer')
-        await pc.setLocalDescription(answer)
-
-        await fetch('/api/call', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            from: username,
-            signal: { type: 'answer', sdp: answer.sdp }
-          })
-        })
-
-        setCallStatus('connected')
-        setInCall(true)
+        pendingCandidatesRef.current = []
       }
+      
+      // Create answer
+      const answer = await pc.createAnswer()
+      console.log('Created answer')
+      await pc.setLocalDescription(answer)
+
+      // Send answer
+      await fetch('/api/call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: username,
+          signal: { type: 'answer', sdp: answer.sdp }
+        })
+      })
+
+      setCallStatus('connected')
+      setInCall(true)
+      window.sessionStorage.removeItem('pendingOffer')
     } catch (error) {
       console.error('Error answering call:', error)
-      alert('Could not access microphone/camera. Please check permissions.')
+      alert('Could not access microphone/camera. Please check permissions and try again.')
+      setCallStatus('idle')
     }
   }
 
   const rejectCall = () => {
     setCallStatus('idle')
+    window.sessionStorage.removeItem('pendingOffer')
     fetch('/api/call', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
