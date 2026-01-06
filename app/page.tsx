@@ -330,30 +330,29 @@ export default function Chat() {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
         {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
+          urls: 'turn:numb.viagenie.ca',
+          username: 'webrtc@live.com',
+          credential: 'muazkh'
         },
         {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
+          urls: 'turn:192.158.29.39:3478?transport=udp',
+          username: '28224511:1379330808',
+          credential: 'JZEOEt2V3Qb0y27GRntt2u2PAYA='
         },
         {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
+          urls: 'turn:192.158.29.39:3478?transport=tcp',
+          username: '28224511:1379330808',
+          credential: 'JZEOEt2V3Qb0y27GRntt2u2PAYA='
         }
-      ]
+      ],
+      iceTransportPolicy: 'all',
+      iceCandidatePoolSize: 10
     })
 
     pc.onicecandidate = async (event) => {
       if (event.candidate) {
-        console.log('Sending ICE candidate:', event.candidate.type)
+        console.log('Sending ICE candidate:', event.candidate.type, event.candidate.protocol)
         try {
           await fetch('/api/call', {
             method: 'POST',
@@ -366,6 +365,8 @@ export default function Chat() {
         } catch (error) {
           console.error('Error sending ICE candidate:', error)
         }
+      } else {
+        console.log('All ICE candidates sent (null candidate)')
       }
     }
 
