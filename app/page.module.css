@@ -167,6 +167,7 @@
   border-radius: 15px;
   word-wrap: break-word;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  margin-bottom: 5px;
 }
 
 .ownMessage .messageText {
@@ -174,12 +175,135 @@
   color: white;
 }
 
+.replyButton {
+  background: none;
+  border: none;
+  color: #667eea;
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-top: 2px;
+}
+
+.replyButton:hover {
+  text-decoration: underline;
+}
+
+.replyPreview {
+  background: rgba(0, 0, 0, 0.05);
+  border-left: 3px solid #667eea;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border-radius: 5px;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.replyUser {
+  color: #667eea;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.replyText {
+  color: #666;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.typingIndicator {
+  display: flex;
+  gap: 4px;
+  padding: 10px 15px;
+  background: white;
+  border-radius: 15px;
+  width: fit-content;
+  margin-bottom: 15px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.typingDot {
+  width: 8px;
+  height: 8px;
+  background: #667eea;
+  border-radius: 50%;
+  animation: bounce 1.4s infinite ease-in-out;
+}
+
+.typingDot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.typingDot:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
+}
+
 .inputForm {
   display: flex;
+  flex-direction: column;
   gap: 10px;
   padding: 20px;
   background: white;
   border-top: 1px solid #e0e0e0;
+}
+
+.replyingTo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f0f0f0;
+  padding: 10px 15px;
+  border-radius: 10px;
+  border-left: 3px solid #667eea;
+}
+
+.replyingToContent {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.replyingToLabel {
+  color: #667eea;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.replyingToText {
+  color: #666;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cancelReply {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 5px;
+}
+
+.cancelReply:hover {
+  color: #666;
+}
+
+.inputWrapper {
+  display: flex;
+  gap: 10px;
 }
 
 .messageInput {
