@@ -44,6 +44,7 @@ export default function Chat() {
 
   useEffect(() => {
     if (localStream && localVideoRef.current) {
+      console.log('Setting local video stream')
       localVideoRef.current.srcObject = localStream
       localVideoRef.current.play().catch(e => console.error('Error playing local:', e))
     }
@@ -51,17 +52,27 @@ export default function Chat() {
 
   useEffect(() => {
     if (remoteStream) {
-      console.log('Remote stream updated, tracks:', remoteStream.getTracks().map(t => t.kind))
-      if (remoteVideoRef.current) {
+      console.log('Remote stream updated, tracks:', remoteStream.getTracks().map(t => `${t.kind}:${t.enabled}`))
+      
+      if (remoteVideoRef.current && callType === 'video') {
+        console.log('Setting remote video element')
         remoteVideoRef.current.srcObject = remoteStream
-        remoteVideoRef.current.play().catch(e => console.error('Error playing remote video:', e))
+        remoteVideoRef.current.onloadedmetadata = () => {
+          console.log('Remote video metadata loaded')
+          remoteVideoRef.current?.play().catch(e => console.error('Error playing remote video:', e))
+        }
       }
+      
       if (remoteAudioRef.current) {
+        console.log('Setting remote audio element')
         remoteAudioRef.current.srcObject = remoteStream
-        remoteAudioRef.current.play().catch(e => console.error('Error playing remote audio:', e))
+        remoteAudioRef.current.onloadedmetadata = () => {
+          console.log('Remote audio metadata loaded')
+          remoteAudioRef.current?.play().catch(e => console.error('Error playing remote audio:', e))
+        }
       }
     }
-  }, [remoteStream])
+  }, [remoteStream, callType])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -315,7 +326,22 @@ export default function Chat() {
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
+        { urls: 'stun:stun4.l.google.com:19302' },
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        }
       ]
     })
 
@@ -604,15 +630,19 @@ export default function Chat() {
                 <video 
                   ref={remoteVideoRef} 
                   autoPlay 
-                  playsInline 
+                  playsInline
+                  controls={false}
                   className={styles.remoteVideo}
+                  style={{ backgroundColor: '#000' }}
                 />
                 <video 
                   ref={localVideoRef} 
                   autoPlay 
                   playsInline 
                   muted 
+                  controls={false}
                   className={styles.localVideo}
+                  style={{ backgroundColor: '#000' }}
                 />
               </>
             ) : (
